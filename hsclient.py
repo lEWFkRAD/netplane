@@ -3,6 +3,10 @@
 Talks to the local Headscale control plane over its gRPC endpoint
 (127.0.0.1:50443, grpc_allow_insecure). Generated protobuf stubs are
 bundled in this package under proto/ (regenerate with scripts/gen_proto.sh).
+
+Settings arrive via apply_settings() at register() time (plugin
+config_schema keys grpc_addr / apikey_file / apikey / control_url /
+proto_dir). Environment variables are a fallback for standalone use.
 """
 from __future__ import annotations
 
@@ -12,41 +16,38 @@ import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
 
-# Defaults: env vars first, overridable at register() time via plugin
-# settings (config_schema keys grpc_addr / apikey_file / control_url /
-# proto_dir). apply_settings() rewrites these module globals.
-PROTO_DIR = os.environ.get(
-    "NETPLANE_PROTO_DIR",
-    os.path.join(_HERE, "proto"),
-)
-APIKEY_FILE = os.environ.get(
-    "NETPLANE_APIKEY_FILE",
-    os.path.join(_HERE, "api.key"),
-)
-GRPC_ADDR = os.environ.get("NETPLANE_GRPC_ADDR", "127.0.0.1:50443")
-CONTROL_URL = os.environ.get(
-    "NETPLANE_CONTROL_URL", "https://onyx-linux.tail3bf242.ts.net:8443")
+PROTO_DIR = os.path.join(_HERE, "proto")
+APIKEY_FILE = os.path.join(_HERE, "api.key")
+APIKEY = ""
+GRPC_ADDR = "127.0.0.1:50443"
+CONTROL_URL = ""
 
 if PROTO_DIR not in sys.path:
     sys.path.insert(0, PROTO_DIR)
 
 
 def apply_settings(settings: dict) -> None:
-    """Apply this plugin's config_schema settings over the env defaults."""
-    global PROTO_DIR, APIKEY_FILE, GRPC_ADDR, CONTROL_URL
-    if settings.get("grpc_addr"):
-        GRPC_ADDR = str(settings["grpc_addr"])
-    if settings.get("apikey_file"):
-        APIKEY_FILE = os.path.expanduser(str(settings["apikey_file"]))
-    if settings.get("control_url"):
-        CONTROL_URL = str(settings["control_url"])
-    if settings.get("proto_dir"):
-        PROTO_DIR = os.path.expanduser(str(settings["proto_dir"]))
+    """Apply this plugin's config_schema settings (over env fallbacks)."""
+    global PROTO_DIR, APIKEY_FILE, APIKEY, GRPC_ADDR, CONTROL_URL
+    env = os.environ
+    GRPC_ADDR = str(settings.get("grpc_addr") or env.get("NETPLANE_GRPC_ADDR")
+                    or "127.0.0.1:50443")
+    APIKEY = str(settings.get("apikey") or env.get("NETPLANE_APIKEY") or "")
+    file = settings.get("apikey_file") or env.get("NETPLANE_APIKEY_FILE")
+    APIKEY_FILE = os.path.expanduser(str(file)) if file else os.path.join(
+        _HERE, "api.key")
+    CONTROL_URL = str(settings.get("control_url")
+                      or env.get("NETPLANE_CONTROL_URL") or "")
+    proto = settings.get("proto_dir") or env.get("NETPLANE_PROTO_DIR")
+    if proto:
+        PROTO_DIR = os.path.expanduser(str(proto))
         if PROTO_DIR not in sys.path:
             sys.path.insert(0, PROTO_DIR)
 
 
 def read_apikey() -> str:
+    if APIKEY:
+        return APIKEY
     with open(APIKEY_FILE, "r", encoding="utf-8") as fh:
         return fh.read().strip()
 

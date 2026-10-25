@@ -6,11 +6,11 @@ description: >-
   join-keys, plus a Desktop dashboard pane.
 author: Jeff Watts
 kind: standalone
-requires_env:
-  - NETPLANE_APIKEY_FILE
+requires_env: []
 config_schema:
   grpc_addr: {type: str, default: "127.0.0.1:50443", description: "Headscale gRPC address"}
   apikey_file: {type: str, default: "", description: "Path to the Headscale API key file (empty = api.key in the plugin dir)"}
+  apikey: {type: str, default: "", secret: true, description: "Headscale API key (takes precedence over apikey_file; set via Hermes secret scope)"}
   control_url: {type: str, default: "", description: "Control-plane URL shown in status (e.g. https://host.example:8443)"}
   proto_dir: {type: str, default: "", description: "Path to generated gRPC stubs (empty = proto/ in the plugin dir)"}
 python_dependencies:

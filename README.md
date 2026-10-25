@@ -23,14 +23,18 @@ all calls go to your own Headscale over local gRPC.
 1. **Headscale** running locally with gRPC enabled
    (`grpc_listen_addr: 127.0.0.1:50443`, `grpc_allow_insecure: true` for a
    loopback-only setup).
-2. **API key**: create one (`headscale apikeys create`) and put it in
-   `api.key` next to `hsclient.py`, or point `NETPLANE_APIKEY_FILE` at it.
-   The file is read at call time; keep it mode 600.
-3. **Env** (all optional, sensible defaults):
-   - `NETPLANE_GRPC_ADDR` — default `127.0.0.1:50443`
-   - `NETPLANE_APIKEY_FILE` — default `api.key` in the plugin dir
-   - `NETPLANE_CONTROL_URL` — the URL shown in status output
-   - `NETPLANE_PROTO_DIR` — default `proto/` in the plugin dir
+2. **API key**: create one (`headscale apikeys create`) and either set it as
+   a Hermes secret (`NETPLANE_APIKEY`, read via Hermes's secret scope), put
+   it in the plugin's `config_schema` `apikey` setting, or point
+   `apikey_file` at a file (default `api.key` next to `hsclient.py`). The
+   file is read at call time; keep it mode 600.
+3. **Settings** (all optional, sensible defaults; env vars are a fallback
+   for standalone use):
+   - `grpc_addr` / `NETPLANE_GRPC_ADDR` — default `127.0.0.1:50443`
+   - `apikey` / `NETPLANE_APIKEY` — the key itself (secret)
+   - `apikey_file` / `NETPLANE_APIKEY_FILE` — default `api.key` in the plugin dir
+   - `control_url` / `NETPLANE_CONTROL_URL` — the URL shown in status output
+   - `proto_dir` / `NETPLANE_PROTO_DIR` — default `proto/` in the plugin dir
 4. Install and enable:
    ```bash
    hermes plugins install <owner>/netplane
@@ -46,9 +50,9 @@ all calls go to your own Headscale over local gRPC.
   output, not raised).
 - **Writes:** `netplane_preauth(create=true)` mints a preauth key on your
   control plane — treat the returned key as a secret join credential.
-- **Credentials:** the Headscale API key is read from the file named by
-  `NETPLANE_APIKEY_FILE`; the plugin never sends it anywhere except the
-  configured gRPC endpoint.
+- **Credentials:** the Headscale API key comes from the Hermes secret scope
+  (`NETPLANE_APIKEY`) or a user-configured file (`apikey_file`); the plugin
+  never sends it anywhere except the configured gRPC endpoint.
 - **Desktop backend deps:** the Desktop pane's Python backend needs
   `grpcio` + `protobuf` in the Desktop serve venv; the installer resolves
   `python_dependencies` declared in `plugin.yaml`.

@@ -18,6 +18,11 @@ all calls go to your own Headscale over local gRPC.
   with a sidebar nav row and a command-palette entry
 - Backend API: `/api/plugins/netplane/*` (FastAPI, for the Desktop pane)
 
+## Compatibility
+
+Requires Hermes **>= 0.19** (plugin `config_schema`, secret-scope reads, and
+the Desktop plugin SDK surfaces this plugin uses).
+
 ## Setup
 
 1. **Headscale** running locally with gRPC enabled

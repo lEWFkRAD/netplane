@@ -171,3 +171,64 @@ Automatic provisioning is for the same Linux host as Hermes. Remote
 provisioning, upgrades, existing-server takeover, reverse-proxy installation,
 firewall/DNS changes and device migration are not included. Existing servers
 can still be managed through their configured gRPC endpoint.
+
+## Testing
+
+Verified on **2026-10-25** in a fresh, isolated **Ubuntu 24.04 systemd VM**:
+Hermes `1f91da2a277093c6909542d8c725c0c52fae4628`, NetPlane
+`10b6bff5cf5bb521d39e4443d9d33ee6768fbb23`, and Headscale **0.29.6**.
+The guest harness passed real Hermes plugin install/enable and tool dispatch,
+setup planning and denial/approval, installation in `reverse_proxy` mode,
+profile-only API-key storage with owner-only permissions, management RPCs,
+denied/approved single-use join-key creation, secret-free listings, key
+expiry/deletion, repeat-install refusal, and bootstrap-key revocation.
+
+Separately configured nginx with a disposable test certificate passed local
+HTTPS `/health` with certificate verification. After a guest reboot, nginx
+and Headscale remained enabled/active and HTTPS health passed again. The
+local suite also passed **85 tests** and **16/16 Hermes admission checks**;
+the expected admission caution covers network listeners and sudo usage.
+
+To reproduce the harness, first install Hermes in the guest and provide a
+Git checkout of NetPlane containing `tests/vm_integration.py`. **Run as root
+only inside a fresh, disposable systemd VM—not on your development or
+production host.** It installs packages and leaves a persistent Headscale
+service; successful runs revoke test credentials and remove the temporary
+Hermes profile. Dispose of the VM afterward, especially after a failure.
+
+```bash
+/usr/bin/python3 /opt/netplane-test/tests/vm_integration.py \
+  --allow-disposable-vm \
+  --hermes-root /opt/hermes-agent \
+  --plugin-source /opt/netplane-test \
+  --ref 10b6bff5cf5bb521d39e4443d9d33ee6768fbb23
+```
+
+The harness does not configure nginx or a public endpoint. Public DNS/ACME,
+real Tailscale node enrollment, and interactive Desktop UI behavior have
+**not** been verified by these tests. The guest runs setup as root; the
+noninteractive sudo path is covered by unit tests, not this VM run.
+
+## Credits and acknowledgments
+
+- **Jeff Watts ([lEWFkRAD](https://github.com/lEWFkRAD))** — project owner
+  and maintainer.
+- **Qwen 3.8** — original plugin implementation, directed by Jeff.
+- **Tek ([teknium1](https://github.com/teknium1))** — security and Hermes
+  integration review in [the catalog submission](https://github.com/NousResearch/hermes-agent/pull/144260).
+- **OpenAI Codex** — follow-up code audit, security hardening, setup
+  implementation and testing, directed by Jeff.
+- **Nous Research and Hermes contributors** — the agent, plugin framework
+  and Desktop integration this plugin builds on.
+- **Headscale and Tailscale contributors** — the control-plane software,
+  API definitions and client/networking ecosystem. The bundled Headscale
+  protocol definitions come from the pinned upstream revision documented
+  in `scripts/gen_proto.sh`.
+- **Google APIs, gRPC and Protocol Buffers contributors** — API annotations,
+  binding generation and runtime libraries. Bundled Google API source files
+  retain their upstream copyright and Apache 2.0 notices.
+
+These acknowledgments describe contributions and dependencies; they do not
+imply endorsement or affiliation. Existing Git authorship and upstream
+notices are preserved. Vendored-source provenance and license copies are in
+[LICENSES](LICENSES/README.md); these do not license NetPlane's original code.

@@ -1,87 +1,141 @@
 """Shared Headscale gRPC client for the netplane plugin.
 
-Talks to the local Headscale control plane over its gRPC endpoint
-(127.0.0.1:50443, grpc_allow_insecure). Generated protobuf stubs are
-bundled in this package under proto/ (regenerate with scripts/gen_proto.sh).
-
-Settings arrive via apply_settings() at register() time (plugin
-config_schema keys grpc_addr / apikey_file / apikey / control_url /
-proto_dir). Environment variables are a fallback for standalone use.
+Configuration is resolved through Hermes for every call. Credentials come
+only from the active profile's secret scope; they are never cached here or
+read directly from process environment or disk.
 """
+
 from __future__ import annotations
 
 import datetime as _dt
+import ipaddress
 import os
 import sys
+from typing import Any
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
+_DEFAULT_PROTO_DIR = os.path.join(_HERE, "proto")
+_DEFAULT_GRPC_ADDR = "127.0.0.1:50443"
+_ctx: Any = None
 
-PROTO_DIR = os.path.join(_HERE, "proto")
-APIKEY_FILE = os.path.join(_HERE, "api.key")
-APIKEY = ""
-GRPC_ADDR = "127.0.0.1:50443"
-CONTROL_URL = ""
-
-if PROTO_DIR not in sys.path:
-    sys.path.insert(0, PROTO_DIR)
+if _DEFAULT_PROTO_DIR not in sys.path:
+    sys.path.insert(0, _DEFAULT_PROTO_DIR)
 
 
-def apply_settings(settings: dict) -> None:
-    """Apply this plugin's config_schema settings (over env fallbacks)."""
-    global PROTO_DIR, APIKEY_FILE, APIKEY, GRPC_ADDR, CONTROL_URL
-    env = os.environ
-    GRPC_ADDR = str(settings.get("grpc_addr") or env.get("NETPLANE_GRPC_ADDR")
-                    or "127.0.0.1:50443")
-    APIKEY = str(settings.get("apikey") or env.get("NETPLANE_APIKEY") or "")
-    file = settings.get("apikey_file") or env.get("NETPLANE_APIKEY_FILE")
-    APIKEY_FILE = os.path.expanduser(str(file)) if file else os.path.join(
-        _HERE, "api.key")
-    CONTROL_URL = str(settings.get("control_url")
-                      or env.get("NETPLANE_CONTROL_URL") or "")
-    proto = settings.get("proto_dir") or env.get("NETPLANE_PROTO_DIR")
-    if proto:
-        PROTO_DIR = os.path.expanduser(str(proto))
-        if PROTO_DIR not in sys.path:
-            sys.path.insert(0, PROTO_DIR)
+def configure(ctx: Any) -> None:
+    """Retain the plugin context so settings can be read at invocation time."""
+    global _ctx
+    _ctx = ctx
+
+
+def _config(key: str, default: Any) -> Any:
+    if _ctx is None:
+        return default
+    return _ctx.get_config(key, default)
+
+
+def grpc_addr() -> str:
+    return str(_config("grpc_addr", _DEFAULT_GRPC_ADDR) or _DEFAULT_GRPC_ADDR)
+
+
+def control_url() -> str:
+    return str(_config("control_url", "") or "")
+
+
+def prepare_proto_path() -> str:
+    """Make this package's bundled generated stubs importable."""
+    if _DEFAULT_PROTO_DIR not in sys.path:
+        sys.path.insert(0, _DEFAULT_PROTO_DIR)
+    return _DEFAULT_PROTO_DIR
 
 
 def read_apikey() -> str:
-    if APIKEY:
-        return APIKEY
-    with open(APIKEY_FILE, "r", encoding="utf-8") as fh:
-        return fh.read().strip()
+    """Read the active Hermes profile's Headscale credential."""
+    from agent.secret_scope import get_secret
+
+    key = (get_secret("NETPLANE_APIKEY") or "").strip()
+    if not key:
+        raise RuntimeError(
+            "NETPLANE_APIKEY is not configured in the active Hermes secret scope"
+        )
+    return key
 
 
 def timestamp_in(seconds: int):
-    """protobuf Timestamp for now + seconds."""
+    """Return a protobuf Timestamp for now plus *seconds*."""
     import time
 
+    prepare_proto_path()
     from google.protobuf import timestamp_pb2
 
     ts = timestamp_pb2.Timestamp()
-    ts.FromJsonString(_dt.datetime.fromtimestamp(
-        time.time() + seconds, _dt.timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ"))
+    ts.FromJsonString(
+        _dt.datetime.fromtimestamp(time.time() + seconds, _dt.timezone.utc).strftime(
+            "%Y-%m-%dT%H:%M:%SZ"
+        )
+    )
     return ts
 
 
-def stub():
+def _is_loopback_target(target: str) -> bool:
+    """Return whether a gRPC target is confined to this host."""
+    value = target.strip()
+    if value.startswith(("unix:", "unix-abstract:")):
+        return True
+    for prefix in ("dns:///", "ipv4:", "ipv6:"):
+        if value.startswith(prefix):
+            value = value[len(prefix) :]
+            break
+    if value.startswith("["):
+        end = value.find("]")
+        host = value[1:end] if end >= 0 else value
+    else:
+        try:
+            return ipaddress.ip_address(value.split("%", 1)[0]).is_loopback
+        except ValueError:
+            host = value.rsplit(":", 1)[0] if ":" in value else value
+    host = host.strip("[]").split("%", 1)[0].lower()
+    if host == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(host).is_loopback
+    except ValueError:
+        return False
+
+
+def _channel():
     import grpc
 
+    target = grpc_addr()
+    if _is_loopback_target(target):
+        return grpc.insecure_channel(target)
+    credentials = grpc.ssl_channel_credentials()
+    return grpc.secure_channel(target, credentials)
+
+
+def _new_stub():
+    prepare_proto_path()
     from headscale.v1 import headscale_pb2_grpc
 
-    channel = grpc.insecure_channel(GRPC_ADDR)
-    return headscale_pb2_grpc.HeadscaleServiceStub(channel)
+    channel = _channel()
+    return channel, headscale_pb2_grpc.HeadscaleServiceStub(channel)
 
 
 def call(method: str, request, timeout: float = 5.0):
-    """Invoke a stub method with the Bearer apikey metadata."""
-    import grpc
-
+    """Invoke a Headscale RPC using the current profile's API key."""
     key = read_apikey()
-    stub_ = stub()
-    fn = getattr(stub_, method)
-    return fn(request, metadata=[("authorization", f"Bearer {key}")],
-              timeout=timeout)
+    channel, service = _new_stub()
+    try:
+        fn = getattr(service, method)
+        return fn(
+            request,
+            metadata=[("authorization", f"Bearer {key}")],
+            timeout=timeout,
+        )
+    finally:
+        close = getattr(channel, "close", None)
+        if callable(close):
+            close()
 
 
 def node_to_dict(n) -> dict:
@@ -99,10 +153,10 @@ def node_to_dict(n) -> dict:
     }
 
 
-def preauth_to_dict(k) -> dict:
-    return {
+def preauth_to_dict(k, *, include_key: bool = False) -> dict:
+    """Serialize a preauth key, hiding the join secret unless just created."""
+    result = {
         "id": k.id,
-        "key": k.key,
         "user": k.user.name if k.HasField("user") else "",
         "reusable": k.reusable,
         "ephemeral": k.ephemeral,
@@ -111,3 +165,6 @@ def preauth_to_dict(k) -> dict:
         "last_used": "",
         "used": k.used,
     }
+    if include_key:
+        result["key"] = k.key
+    return result

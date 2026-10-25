@@ -7,17 +7,19 @@ description: >-
 author: Jeff Watts
 kind: standalone
 requires_hermes: ">=0.19"
-requires_env: []
+requires_env:
+  - name: NETPLANE_APIKEY
+    description: "Headscale API key"
+    secret: true
 config_schema:
   grpc_addr: {type: str, default: "127.0.0.1:50443", description: "Headscale gRPC address"}
-  apikey_file: {type: str, default: "", description: "Path to the Headscale API key file (empty = api.key in the plugin dir)"}
-  apikey: {type: str, default: "", secret: true, description: "Headscale API key (takes precedence over apikey_file; set via Hermes secret scope)"}
   control_url: {type: str, default: "", description: "Control-plane URL shown in status (e.g. https://host.example:8443)"}
-  proto_dir: {type: str, default: "", description: "Path to generated gRPC stubs (empty = proto/ in the plugin dir)"}
 python_dependencies:
-  - grpcio>=1.60,<2
-  - protobuf>=5.26,<7
+  - grpcio>=1.81.1,<2
+  - protobuf>=6.33.5,<7
 provides_tools:
   - netplane_status
   - netplane_nodes
   - netplane_preauth
+provides_hooks:
+  - pre_tool_call

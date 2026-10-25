@@ -34,6 +34,17 @@ function fmtAgo(iso) {
   return new Date(iso).toLocaleDateString()
 }
 
+function fmtExpiry(iso) {
+  if (!iso) return '—'
+  const date = new Date(iso)
+  const seconds = (date.getTime() - Date.now()) / 1000
+  if (!Number.isFinite(seconds)) return 'invalid date'
+  if (seconds <= 0) return `expired ${fmtAgo(iso)}`
+  if (seconds < 5400) return `in ${Math.max(1, Math.round(seconds / 60))}m`
+  if (seconds < 86400 * 7) return `in ${Math.round(seconds / 3600)}h`
+  return `on ${date.toLocaleDateString()}`
+}
+
 function StatusCard({ status }) {
   const svc = status?.checks?.headscale_service
   const svcUp = svc === 'active'
@@ -55,7 +66,8 @@ function NodeRow({ n }) {
     onSuccess: () => {
       haptic('tap')
       qc.invalidateQueries({ queryKey: ['netplane', 'nodes'] })
-    }
+    },
+    onError: (e) => host.notify({ kind: 'error', message: `expire failed: ${e?.message || e}` })
   })
   return jsxs('div', {
     className: 'flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-3 py-1.5 text-sm last:border-b-0',
@@ -70,7 +82,12 @@ function NodeRow({ n }) {
         size: 'sm',
         className: 'text-(--ui-text-quaternary)',
         disabled: expire.isPending,
-        onClick: () => expire.mutate(),
+        onClick: () => {
+          const name = n.given_name || n.hostname
+          if (window.confirm(`Expire node ${name}? It will need to authenticate again.`)) {
+            expire.mutate()
+          }
+        },
         children: 'expire'
       })
     ]
@@ -81,10 +98,10 @@ function PreauthRow({ k }) {
   return jsxs('div', {
     className: 'flex items-center gap-2 border-b border-(--ui-stroke-secondary) px-3 py-1.5 text-sm last:border-b-0',
     children: [
-      jsx('span', { className: 'w-44 truncate font-mono text-xs text-(--ui-text-tertiary)', children: k.key.slice(0, 24) + '…' }),
+      jsx('span', { className: 'w-44 truncate text-xs text-(--ui-text-tertiary)', children: k.user || `key #${k.id}` }),
       jsx(Badge, { tone: k.used ? 'neutral' : 'success', children: k.used ? 'used' : 'fresh' }),
       k.reusable ? jsx(Badge, { tone: 'neutral', children: 'reusable' }) : null,
-      jsx('span', { className: 'flex-1 text-(--ui-text-quaternary) text-xs', children: `exp ${fmtAgo(k.expiration)} · created ${fmtAgo(k.created)}` })
+      jsx('span', { className: 'flex-1 text-(--ui-text-quaternary) text-xs', children: `expires ${fmtExpiry(k.expiration)} · created ${fmtAgo(k.created)}` })
     ]
   })
 }
@@ -101,7 +118,7 @@ function NetPlanePage() {
   const preauth = useQuery({ queryKey: ['netplane', 'preauth'], queryFn: () => ctxRest('/preauth'), refetchInterval: 60000 })
   const qc = useQueryClient()
   const mkKey = useMutation({
-    mutationFn: () => ctxRest('/preauth', { method: 'POST', body: { user: 'onyx', expiry_hours: 24, reusable: true } }),
+    mutationFn: () => ctxRest('/preauth', { method: 'POST', body: { expiry_hours: 24, reusable: false } }),
     onSuccess: (r) => {
       haptic('tap')
       host.notify({ kind: 'success', message: `Join key ready: ${r.key.key}` })

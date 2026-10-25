@@ -11,7 +11,7 @@ from headscale.v1 import policy_pb2 as headscale_dot_v1_dot_policy__pb2
 from headscale.v1 import preauthkey_pb2 as headscale_dot_v1_dot_preauthkey__pb2
 from headscale.v1 import user_pb2 as headscale_dot_v1_dot_user__pb2
 
-GRPC_GENERATED_VERSION = '1.84.1'
+GRPC_GENERATED_VERSION = '1.81.1'
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 

@@ -10,6 +10,7 @@ from __future__ import annotations
 import datetime as _dt
 import ipaddress
 import os
+import re
 import sys
 from typing import Any
 
@@ -107,6 +108,24 @@ def _channel():
     import grpc
 
     target = grpc_addr()
+    tls_name = str(_config("grpc_tls_server_name", "") or "")
+    if tls_name:
+        # Headscale's built-in HTTPS also enables TLS for its loopback gRPC
+        # listener. Verify that certificate against the configured DNS name.
+        if not _is_loopback_target(target) or not re.fullmatch(
+            r"(?=.{1,253}$)[a-zA-Z0-9](?:[a-zA-Z0-9.-]*[a-zA-Z0-9])?", tls_name
+        ):
+            raise ValueError(
+                "grpc_tls_server_name requires a loopback target and DNS name"
+            )
+        return grpc.secure_channel(
+            target,
+            grpc.ssl_channel_credentials(),
+            options=(
+                ("grpc.ssl_target_name_override", tls_name),
+                ("grpc.default_authority", tls_name),
+            ),
+        )
     if _is_loopback_target(target):
         return grpc.insecure_channel(target)
     credentials = grpc.ssl_channel_credentials()

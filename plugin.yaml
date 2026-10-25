@@ -1,23 +1,26 @@
 name: netplane
-version: 0.2.0
+version: 0.3.0
 description: >-
-  Manage a self-hosted Tailscale control plane (Headscale) from Hermes:
+  Install, configure and manage a self-hosted Tailscale control plane (Headscale) from Hermes:
   control-plane health, node inventory with online state, and preauth
   join-keys, plus a Desktop dashboard pane.
 author: Jeff Watts
 kind: standalone
-requires_hermes: ">=0.19"
-requires_env:
+requires_hermes: ">=0.21.6"
+optional_env:
   - name: NETPLANE_APIKEY
-    description: "Headscale API key"
+    description: "Headscale API key; setup saves one, management requires it"
     secret: true
 config_schema:
+  api_key: {type: secret, env: NETPLANE_APIKEY, description: "Headscale API key in the active Hermes profile"}
   grpc_addr: {type: str, default: "127.0.0.1:50443", description: "Headscale gRPC address"}
+  grpc_tls_server_name: {type: str, default: "", description: "Certificate DNS name for a TLS-enabled loopback gRPC listener"}
   control_url: {type: str, default: "", description: "Control-plane URL shown in status (e.g. https://host.example:8443)"}
 python_dependencies:
   - grpcio>=1.81.1,<2
   - protobuf>=6.33.5,<7
 provides_tools:
+  - netplane_setup
   - netplane_status
   - netplane_nodes
   - netplane_preauth

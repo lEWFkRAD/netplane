@@ -198,6 +198,8 @@ class DashboardPluginApiTests(unittest.TestCase):
 
     def test_routes_are_sync_so_blocking_io_runs_in_fastapi_threadpool(self):
         for route in (
+            self.api.setup_plan,
+            self.api.setup_install,
             self.api.status,
             self.api.nodes,
             self.api.expire_node,
@@ -206,6 +208,45 @@ class DashboardPluginApiTests(unittest.TestCase):
         ):
             with self.subTest(route=route.__name__):
                 self.assertFalse(inspect.iscoroutinefunction(route))
+
+    def test_setup_plan_cannot_be_used_to_install(self):
+        with mock.patch.object(
+            self.api.setup_flow, "run", return_value={"ok": True}
+        ) as run:
+            self.api.setup_plan(
+                {"action": "install", "server_url": "https://hs.example.com"}
+            )
+        self.assertEqual(run.call_args.args[0]["action"], "plan")
+
+    def test_install_requires_literal_confirmation_before_dispatch(self):
+        with mock.patch.object(
+            self.api.setup_flow, "run", return_value={"ok": True}
+        ) as run:
+            for value in (None, False, 1, "true"):
+                with (
+                    self.subTest(value=value),
+                    self.assertRaises(self.api.HTTPException),
+                ):
+                    self.api.setup_install({"confirmed": value})
+            run.assert_not_called()
+            self.api.setup_install({"confirmed": True, "action": "plan"})
+            self.assertEqual(run.call_args.args[0]["action"], "install")
+
+    def test_install_failure_preserves_recovery_state_for_the_desktop(self):
+        failure = {
+            "ok": False,
+            "error": "Credential storage failed.",
+            "installed": True,
+            "stage": "credential_storage",
+            "credential_revocation": "failed",
+        }
+        with (
+            mock.patch.object(self.api.setup_flow, "run", return_value=failure),
+            self.assertRaises(self.api.HTTPException) as raised,
+        ):
+            self.api.setup_install({"confirmed": True})
+        self.assertIn("installed: True", raised.exception.detail)
+        self.assertIn("credential revocation: failed", raised.exception.detail)
 
     def test_every_rpc_route_prepares_the_bundled_proto_path(self):
         user = types.SimpleNamespace(id=7, name="alice")

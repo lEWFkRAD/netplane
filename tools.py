@@ -5,7 +5,7 @@ from __future__ import annotations
 import json
 import subprocess
 
-from . import hsclient
+from . import hsclient, setup_flow
 
 
 def _handler(name):
@@ -69,6 +69,16 @@ def netplane_nodes(args: dict, **_kw) -> str:
     return json.dumps([hsclient.node_to_dict(n) for n in r.nodes], indent=2)
 
 
+@_handler("netplane_setup")
+def netplane_setup(args: dict, **_kw) -> str:
+    """Preview or install/configure Headscale on this Debian/Ubuntu host.
+
+    Start with action=plan and a public HTTPS server_url. Installation requires
+    approval and root or noninteractive sudo; it refuses existing installations.
+    """
+    return json.dumps(setup_flow.run(args), indent=2)
+
+
 @_handler("netplane_preauth")
 def netplane_preauth(args: dict, **_kw) -> str:
     """List preauth keys, or create one (join token) for a new device."""
@@ -116,6 +126,31 @@ def _approve_key_creation(
 ) -> dict | None:
     """Require explicit human approval before minting a join credential."""
     leaf_name = tool_name.rsplit(":", 1)[-1].rsplit("/", 1)[-1].rsplit(".", 1)[-1]
+    if leaf_name == "netplane_setup" and isinstance(args, dict):
+        if args.get("action", "plan") != "install":
+            return None
+        preview = setup_flow.plan(args)
+        options = preview.get("options", {}) if preview.get("ok") else {}
+        target = options.get("server_url", "the requested HTTPS endpoint")
+        mode = options.get("tls_mode", "the requested TLS mode")
+        owner = options.get("headscale_user", "the initial user")
+        certificate = (
+            f"Let's Encrypt will receive the domain and contact email {options['acme_email']}. "
+            if mode == "letsencrypt" and options.get("acme_email")
+            else "The existing HTTPS reverse proxy must be configured separately. "
+        )
+        return {
+            "action": "approve",
+            "message": (
+                f"Install and configure Headscale for {target} ({mode}) "
+                f"with initial user {owner} on the host running Hermes? "
+                "This downloads the pinned official package, uses root privileges, "
+                "writes /etc/headscale, enables and starts its system service, "
+                "creates the first user, and saves a new API key and connection "
+                f"settings in the active Hermes profile. {certificate}Review the setup plan "
+                "for the domain, TLS mode and network listeners before approving."
+            ),
+        }
     if leaf_name != "netplane_preauth" or not isinstance(args, dict):
         return None
     if args.get("create", False) is not True:
@@ -145,6 +180,38 @@ def _approve_key_creation(
 
 
 _PROPS = {
+    "netplane_setup": {
+        "action": {
+            "type": "string",
+            "enum": ["plan", "install"],
+            "default": "plan",
+            "description": "Preview first; install applies the approved setup",
+        },
+        "server_url": {
+            "type": "string",
+            "description": "Public HTTPS URL devices use to reach Headscale",
+        },
+        "tls_mode": {
+            "type": "string",
+            "enum": ["letsencrypt", "reverse_proxy"],
+            "default": "letsencrypt",
+            "description": "Automatic TLS, or an existing HTTPS reverse proxy",
+        },
+        "acme_email": {
+            "type": "string",
+            "description": "Email for Let's Encrypt; required with letsencrypt",
+        },
+        "base_domain": {
+            "type": "string",
+            "default": "tailnet.internal",
+            "description": "MagicDNS base domain, different from the server hostname",
+        },
+        "headscale_user": {
+            "type": "string",
+            "default": "hermes",
+            "description": "Initial Headscale user to create",
+        },
+    },
     "netplane_preauth": {
         "create": {
             "type": "boolean",
@@ -172,7 +239,7 @@ _PROPS = {
 
 def register(ctx) -> None:
     ctx.register_hook("pre_tool_call", _approve_key_creation)
-    for fn in (netplane_status, netplane_nodes, netplane_preauth):
+    for fn in (netplane_setup, netplane_status, netplane_nodes, netplane_preauth):
         ctx.register_tool(
             name=fn.__name__,
             toolset="netplane",

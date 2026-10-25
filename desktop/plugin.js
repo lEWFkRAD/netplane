@@ -22,6 +22,7 @@ import {
   useQueryClient
 } from '@hermes/plugin-sdk'
 import { jsx, jsxs } from 'react/jsx-runtime'
+import { useState } from 'react'
 
 const ID = 'netplane'
 
@@ -111,6 +112,80 @@ function ctxRest(path, opts) {
   return ctxRef.rest(path, opts)
 }
 
+function SetupPanel() {
+  const qc = useQueryClient()
+  const [options, setOptions] = useState({ server_url: '', tls_mode: 'letsencrypt', acme_email: '', base_domain: 'tailnet.internal', headscale_user: 'hermes' })
+  const [plan, setPlan] = useState(null)
+  const [installed, setInstalled] = useState(false)
+  const preview = useMutation({
+    mutationFn: (values) => ctxRest('/setup/plan', { method: 'POST', body: values }),
+    onSuccess: (result) => setPlan(result),
+    onError: () => setPlan(null)
+  })
+  const install = useMutation({
+    mutationFn: (values) => ctxRest('/setup/install', { method: 'POST', body: { ...values, confirmed: true } }),
+    onSuccess: () => {
+      setInstalled(true)
+      setPlan(null)
+      qc.invalidateQueries({ queryKey: ['netplane'] })
+      host.notify({ kind: 'success', message: 'Headscale installed and configured. Its API key is saved in Hermes.' })
+    }
+  })
+  const busy = preview.isPending || install.isPending
+  const change = (name, value) => {
+    setOptions({ ...options, [name]: value })
+    setPlan(null)
+    preview.reset()
+    install.reset()
+  }
+  const field = (label, name, type = 'text', placeholder = '') => jsxs('label', {
+    className: 'flex flex-col gap-1 text-xs',
+    children: [
+      label,
+      jsx('input', { type, value: options[name], placeholder, disabled: busy || installed,
+        onChange: (event) => change(name, event.target.value),
+        className: 'rounded border border-(--ui-stroke-secondary) bg-transparent px-2 py-1.5 text-sm' })
+    ]
+  })
+  const error = install.error || preview.error
+  return jsxs('details', {
+    className: 'rounded-md border border-(--ui-stroke-secondary) p-3',
+    children: [
+      jsx('summary', { className: 'cursor-pointer text-sm font-medium', children: 'Install and configure Headscale' }),
+      jsxs('div', { className: 'mt-3 flex flex-col gap-3', children: [
+        jsx('p', { className: 'text-xs text-(--ui-text-tertiary)', children: 'Fresh installation on the Linux host running Hermes: Debian 12+ or Ubuntu 22.04+, systemd, amd64 or arm64. Requires root or noninteractive sudo. Existing installations are preserved and must be configured separately.' }),
+        field('Public control-plane URL', 'server_url', 'url', 'https://headscale.example.com'),
+        jsxs('label', { className: 'flex flex-col gap-1 text-xs', children: [
+          'HTTPS setup',
+          jsxs('select', { value: options.tls_mode, disabled: busy || installed, onChange: (event) => change('tls_mode', event.target.value), className: 'rounded border border-(--ui-stroke-secondary) bg-transparent px-2 py-1.5 text-sm', children: [
+            jsx('option', { value: 'letsencrypt', children: "Automatic certificate with Let's Encrypt" }),
+            jsx('option', { value: 'reverse_proxy', children: 'I already have an HTTPS reverse proxy' })
+          ] })
+        ] }),
+        options.tls_mode === 'letsencrypt' ? field("Let's Encrypt contact email", 'acme_email', 'email') : null,
+        field('MagicDNS domain', 'base_domain'),
+        field('First Headscale user', 'headscale_user'),
+        jsx(Button, { size: 'sm', disabled: busy || installed || !options.server_url, onClick: () => preview.mutate({ ...options }), children: preview.isPending ? 'Preparing plan…' : 'Preview setup' }),
+        error ? jsx(ErrorState, { message: String(error?.message || error) }) : null,
+        plan ? jsxs('div', { className: 'flex flex-col gap-2 text-xs', children: [
+          jsx('p', { children: 'The installer downloads the verified Headscale package, writes its configuration, starts its service, creates the first user and saves the API key in your active Hermes profile.' }),
+          jsx('p', { children: options.tls_mode === 'letsencrypt' ? "Point this domain's DNS at the host and allow inbound TCP 80/443 and UDP 3478. Let's Encrypt receives the domain and contact email." : 'Your existing proxy must forward HTTPS and WebSocket/Upgrade traffic to 127.0.0.1:8080. Allow inbound UDP 3478 for the embedded relay.' }),
+          jsxs('details', { children: [
+            jsx('summary', { className: 'cursor-pointer', children: 'Review generated configuration' }),
+            jsx('pre', { className: 'mt-2 overflow-x-auto whitespace-pre-wrap rounded bg-(--ui-bg-secondary) p-2', children: typeof plan.config === 'string' ? plan.config : JSON.stringify(plan.config, null, 2) })
+          ] }),
+          jsx(Button, { size: 'sm', disabled: busy, onClick: () => {
+            if (window.confirm(`Install Headscale for ${plan.options.server_url} on the host running Hermes? This uses root privileges, creates its system service and saves a new API key in your active profile.`)) {
+              install.mutate(plan.options)
+            }
+          }, children: install.isPending ? 'Installing…' : 'Install and configure' })
+        ] }) : null,
+        installed ? jsx('p', { className: 'text-sm', children: 'Headscale is installed and configured. Verify that the public HTTPS URL is reachable from a device before joining it.' }) : null
+      ] })
+    ]
+  })
+}
+
 function NetPlanePage() {
   const t = usePluginI18n(ID)
   const status = useQuery({ queryKey: ['netplane', 'status'], queryFn: () => ctxRest('/status'), refetchInterval: 15000 })
@@ -140,6 +215,7 @@ function NetPlanePage() {
       status.isError
         ? jsx(ErrorState, { message: String(status.error?.message || status.error) })
         : status.data ? jsx(StatusCard, { status: status.data }) : null,
+      jsx(SetupPanel, {}),
       jsxs('div', { className: 'rounded-md border border-(--ui-stroke-secondary)', children: [
         jsx('div', { className: 'px-3 py-1.5 text-xs font-medium text-(--ui-text-secondary) uppercase tracking-wide', children: t('nodes') }),
         ...(nodes.data?.nodes?.length ? nodes.data.nodes.map((n) => jsx(NodeRow, { node: n, n }, n.id)) : [jsx(EmptyState, { key: 'e', message: t('noNodes') })])

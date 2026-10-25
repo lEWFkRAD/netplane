@@ -237,6 +237,26 @@ class ToolDispatchTests(unittest.TestCase):
         self.assertIn("alice [31m", message)
         self.assertNotIn("x" * 100, message)
 
+    def test_setup_dispatch_and_approval_distinguish_plan_from_install(self):
+        handler = self.ctx.tools["netplane_setup"]["handler"]
+        with mock.patch.object(
+            tools.setup_flow, "run", return_value={"ok": True}
+        ) as run:
+            result = json.loads(
+                handler({"server_url": "https://hs.example.com"}, session_id="test")
+            )
+        self.assertTrue(result["ok"])
+        run.assert_called_once_with({"server_url": "https://hs.example.com"})
+        hook = self.ctx.hooks["pre_tool_call"]
+        self.assertIsNone(hook(tool_name="netplane_setup", args={}))
+        self.assertIsNone(hook(tool_name="netplane_setup", args={"action": "plan"}))
+        directive = hook(
+            tool_name="netplane.netplane_setup", args={"action": "install"}
+        )
+        self.assertEqual(directive["action"], "approve")
+        self.assertIn("root privileges", directive["message"])
+        self.assertIn("active Hermes profile", directive["message"])
+
 
 class ClientTests(unittest.TestCase):
     def test_settings_are_read_per_key_at_call_time(self):
@@ -371,6 +391,40 @@ class ClientTests(unittest.TestCase):
                 self.assertTrue(hsclient._is_loopback_target(target))
         self.assertFalse(hsclient._is_loopback_target("10.0.0.2:50443"))
         self.assertFalse(hsclient._is_loopback_target("headscale.example:50443"))
+
+    def test_local_acme_grpc_verifies_the_certificate_dns_name(self):
+        grpc = types.ModuleType("grpc")
+        grpc.ssl_channel_credentials = mock.Mock(return_value="system-trust")
+        grpc.secure_channel = mock.Mock(return_value="tls-channel")
+        grpc.insecure_channel = mock.Mock()
+        hsclient.configure(FakeContext({"grpc_tls_server_name": "hs.example.com"}))
+        with mock.patch.dict(sys.modules, {"grpc": grpc}):
+            self.assertEqual(hsclient._channel(), "tls-channel")
+        grpc.secure_channel.assert_called_once_with(
+            "127.0.0.1:50443",
+            "system-trust",
+            options=(
+                ("grpc.ssl_target_name_override", "hs.example.com"),
+                ("grpc.default_authority", "hs.example.com"),
+            ),
+        )
+        grpc.insecure_channel.assert_not_called()
+
+    def test_tls_name_override_is_rejected_for_remote_targets(self):
+        grpc = types.ModuleType("grpc")
+        hsclient.configure(
+            FakeContext(
+                {
+                    "grpc_addr": "other.example.com:50443",
+                    "grpc_tls_server_name": "hs.example.com",
+                }
+            )
+        )
+        with (
+            mock.patch.dict(sys.modules, {"grpc": grpc}),
+            self.assertRaisesRegex(ValueError, "loopback"),
+        ):
+            hsclient._channel()
 
     def test_preauth_serializer_only_includes_secret_when_requested(self):
         timestamp = types.SimpleNamespace(ToJsonString=lambda: "2026-01-01T00:00:00Z")

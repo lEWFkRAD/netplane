@@ -11,9 +11,41 @@ from fastapi import APIRouter, HTTPException
 
 # Dashboard APIs load as top-level modules, so import the agent package's
 # client explicitly to share its live Hermes context and secret scope.
-from hermes_plugins.netplane import hsclient
+from hermes_plugins.netplane import hsclient, setup_flow
 
 router = APIRouter()
+
+
+@router.post("/setup/plan")
+def setup_plan(body: dict):
+    result = setup_flow.run({**body, "action": "plan"})
+    if not result.get("ok"):
+        raise HTTPException(
+            status_code=422, detail=result.get("error", "Invalid setup")
+        )
+    return result
+
+
+@router.post("/setup/install")
+def setup_install(body: dict):
+    if body.get("confirmed") is not True:
+        raise HTTPException(
+            status_code=422, detail="Confirm the setup plan before installing"
+        )
+    result = setup_flow.run({**body, "action": "install"})
+    if not result.get("ok"):
+        details = [result.get("error", "Setup failed")]
+        for key in (
+            "stage",
+            "installation_state",
+            "installed",
+            "credential_revocation",
+            "credential_cleanup",
+        ):
+            if key in result:
+                details.append(f"{key.replace('_', ' ')}: {result[key]}.")
+        raise HTTPException(status_code=400, detail=" ".join(details))
+    return result
 
 
 def _run(cmd: list[str], timeout: int = 5) -> str:

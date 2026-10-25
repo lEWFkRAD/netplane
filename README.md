@@ -189,6 +189,14 @@ and Headscale remained enabled/active and HTTPS health passed again. The
 local suite also passed **85 tests** and **16/16 Hermes admission checks**;
 the expected admission caution covers network listeners and sudo usage.
 
+The test ran in a disposable KVM guest, with no host-directory mounts or
+bridge to the production network. Test join keys and the bootstrap API key
+were revoked or deleted, and the VM was shut down after verification. No
+production Headscale or tailnet configuration was changed. The 85-test suite
+and 16 admission checks were also rerun successfully at
+`ca432caaa18cc681c967b1fee915125643ab28f4`, which adds tests, documentation
+and attribution without changing the VM-tested runtime.
+
 To reproduce the harness, first install Hermes in the guest and provide a
 Git checkout of NetPlane containing `tests/vm_integration.py`. **Run as root
 only inside a fresh, disposable systemd VM—not on your development or
@@ -205,8 +213,8 @@ Hermes profile. Dispose of the VM afterward, especially after a failure.
 ```
 
 The harness does not configure nginx or a public endpoint. Public DNS/ACME,
-real Tailscale node enrollment, and interactive Desktop UI behavior have
-**not** been verified by these tests. The guest runs setup as root; the
+real Tailscale node enrollment, peer traffic, and interactive Desktop UI
+behavior have **not** been verified by these tests. The guest runs setup as root; the
 noninteractive sudo path is covered by unit tests, not this VM run.
 
 ## Credits and acknowledgments

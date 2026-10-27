@@ -1,5 +1,5 @@
 name: netplane
-version: 0.3.0
+version: 0.3.1
 description: >-
   Install, configure and manage a self-hosted Tailscale control plane (Headscale) from Hermes:
   control-plane health, node inventory with online state, and preauth

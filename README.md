@@ -1,3 +1,12 @@
+<!-- project-home:start -->
+![NetPlane concept banner](site/hero.png)
+
+**[NetPlane project homepage](https://lewfkrad.github.io/netplane/)** · [Documentation](https://github.com/lEWFkRAD/netplane#install-and-configure-a-new-control-plane)
+
+Install and manage a self-hosted Headscale control plane from Hermes.
+
+<!-- project-home:end -->
+
 # NetPlane — self-hosted Tailscale control plane for Hermes
 
 NetPlane installs, configures and manages a self-hosted
